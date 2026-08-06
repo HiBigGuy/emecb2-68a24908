@@ -883,6 +883,63 @@ function BacklogPage() {
   const [obsDialogOm, setObsDialogOm] = useState<string | null>(null);
   const [novoObsTexto, setNovoObsTexto] = useState("");
   const [obsEnviando, setObsEnviando] = useState(false);
+  const [obsUnica, setObsUnica] = useState<Record<string, string>>({});
+  const obsUnicaLoaded = useRef<Set<string>>(new Set());
+  const obsUnicaTimer = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    let active = true;
+    const faltantes = Array.from(new Set(sortedRows.map((e) => e.om).filter(Boolean))).filter(
+      (om) => !obsUnicaLoaded.current.has(om),
+    );
+    if (faltantes.length === 0) return;
+    const CHUNK = 200;
+    const run = async () => {
+      for (let i = 0; i < faltantes.length; i += CHUNK) {
+        const chunk = faltantes.slice(i, i + CHUNK);
+        const { data, error } = await supabase
+          .from("backlog_obs_unica")
+          .select("om, obs")
+          .in("om", chunk);
+        if (error) {
+          console.warn("Falha ao carregar observações do backlog", error);
+          break;
+        }
+        if (!active) return;
+        setObsUnica((prev) => {
+          const next = { ...prev };
+          for (const r of data ?? []) next[r.om] = r.obs ?? "";
+          return next;
+        });
+        for (const om of chunk) obsUnicaLoaded.current.add(om);
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [sortedRows]);
+
+  const salvarObsUnica = async (om: string, valor: string) => {
+    const { error } = await supabase
+      .from("backlog_obs_unica")
+      .upsert({ om, obs: valor.trim() || null, atualizado_em: new Date().toISOString() });
+    if (error) console.warn("Falha ao salvar observação", error);
+  };
+
+  const atualizarObsUnica = (om: string, valor: string) => {
+    setObsUnica((prev) => ({ ...prev, [om]: valor }));
+    if (obsUnicaTimer.current[om]) window.clearTimeout(obsUnicaTimer.current[om]);
+    obsUnicaTimer.current[om] = window.setTimeout(() => salvarObsUnica(om, valor), 700);
+  };
+
+  const flushObsUnica = (om: string) => {
+    if (obsUnicaTimer.current[om]) {
+      window.clearTimeout(obsUnicaTimer.current[om]);
+      delete obsUnicaTimer.current[om];
+    }
+    salvarObsUnica(om, obsUnica[om] ?? "");
+  };
 
   useEffect(() => {
     let active = true;
@@ -3107,6 +3164,7 @@ function BacklogPage() {
                 <th className="px-2 py-2 font-semibold">Resp.</th>
                 <th className="px-2 py-2 font-semibold">Equipe</th>
                 <th className="px-2 py-2 font-semibold">Observação</th>
+                <th className="px-2 py-2 font-semibold">Comentários</th>
               </tr>
             </thead>
             <tbody>
@@ -3268,6 +3326,15 @@ function BacklogPage() {
                       <span className="text-slate-500 dark:text-slate-400">{e.equipe}</span>
                     )}
                   </td>
+                  <td className="min-w-[160px] px-2 py-1">
+                    <input
+                      value={obsUnica[e.om] ?? ""}
+                      onChange={(ev) => atualizarObsUnica(e.om, ev.target.value)}
+                      onBlur={() => flushObsUnica(e.om)}
+                      placeholder="Escreva uma observação..."
+                      className="w-full rounded border border-transparent bg-transparent px-1.5 py-1 text-[12px] text-slate-700 placeholder:text-slate-400 hover:border-slate-300 focus:border-[#1f7ad6] focus:bg-white focus:outline-none dark:text-slate-200 dark:hover:border-slate-600 dark:focus:bg-slate-800"
+                    />
+                  </td>
                   <td className="whitespace-nowrap px-2 py-1 text-center">
                     <button
                       type="button"
@@ -3324,6 +3391,7 @@ function BacklogPage() {
                   <th className="px-2 py-2 font-semibold">Resp.</th>
                   <th className="px-2 py-2 font-semibold">Equipe</th>
                   <th className="px-2 py-2 font-semibold">Observação</th>
+                  <th className="px-2 py-2 font-semibold">Comentários</th>
                 </tr>
               </thead>
               <tbody>
@@ -3486,6 +3554,15 @@ function BacklogPage() {
                       ) : (
                         <span className="text-slate-500 dark:text-slate-400">{e.equipe}</span>
                       )}
+                    </td>
+                    <td className="min-w-[160px] px-2 py-1">
+                      <input
+                        value={obsUnica[e.om] ?? ""}
+                        onChange={(ev) => atualizarObsUnica(e.om, ev.target.value)}
+                        onBlur={() => flushObsUnica(e.om)}
+                        placeholder="Escreva uma observação..."
+                        className="w-full rounded border border-transparent bg-transparent px-1.5 py-1 text-[12px] text-slate-700 placeholder:text-slate-400 hover:border-slate-300 focus:border-[#1f7ad6] focus:bg-white focus:outline-none dark:text-slate-200 dark:hover:border-slate-600 dark:focus:bg-slate-800"
+                      />
                     </td>
                     <td className="whitespace-nowrap px-2 py-1 text-center">
                       <button
